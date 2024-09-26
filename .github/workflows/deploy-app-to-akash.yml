@@ -1,0 +1,54 @@
+name: Deploy to akash
+
+on:
+  push:
+    tags:
+      - 'console-*/v[0-9]+.[0-9]+.[0-9]+-beta.[0-9]+'
+      - 'console-*/v[0-9]+.[0-9]+.[0-9]+'
+
+jobs:
+  define-vars:
+    name: Define Variables
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.vars.outputs.app }}
+      image: ${{ steps.vars.outputs.image }}
+    steps:
+      - name: Set app name
+        id: vars
+        run: |
+          API_REGISTRY="ghcr.io/akashnetwork/console-api"
+          WEB_REGISTRY="ghcr.io/akashnetwork/console-web"
+          API_WORKSPACE="apps/api"
+          WEB_WORKSPACE="apps/deploy-web"
+          
+          FULL_TAG="${GITHUB_REF#refs/tags/}"
+          IFS='/' read -r scope version <<< "$FULL_TAG"
+          prerelease_type=$(echo "$version" | sed -n 's/.*-\([a-zA-Z]*\).*/\1/p')
+          app="${scope#console-}"
+          
+          registry_var="$(echo "$app" | tr '[:lower:]' '[:upper:]')_REGISTRY"
+          registry="${!registry_var}"
+          
+          workspace_var="$(echo "$app" | tr '[:lower:]' '[:upper:]')_WORKSPACE"
+          workspace="${!workspace_var}"
+          
+          app="${scope#console-}-${prerelease_type:-stable}"
+          version="${version#v}"
+          
+          echo "::set-output name=workspace::$workspace"
+          echo "::set-output name=app::$app"
+          echo "::set-output name=version::$version"
+          echo "::set-output name=image::$image"
+
+  deploy-akash:
+    name: Deploy to akash
+    uses: ygrishajev/akash-deploy-action/.github/workflows/deploy.yml@main
+    with:
+      PROJECT_PATH: app/apps/${{ define-vars.outputs.workspace }}
+      project_name: ${{ define-vars.outputs.app }}
+      image: ${{ define-vars.outputs.image }}
+    secrets:
+      SEED: ${{ secrets.WALLET_MNEUMONIC }}
+      PASSWORD: ${{ secrets.WALLET_PASSWORD }}
+      ghcr-token: ${{ secrets.GITHUB_TOKEN }}
