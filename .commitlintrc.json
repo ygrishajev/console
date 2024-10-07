@@ -15,7 +15,8 @@
         "deployment",
         "certificate",
         "dx",
-        "stats"
+        "stats",
+        "release"
       ]
     ]
   }
