@@ -1,0 +1,120 @@
+name: Deploy to Akash
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to deploy'
+        required: true
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}
+
+jobs:
+  define-vars:
+    name: Define Variables
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      packages: write
+
+    outputs:
+      app: ${{ steps.vars.outputs.app }}
+      image: ${{ steps.vars.outputs.image }}
+      workspace: ${{ steps.vars.outputs.workspace }}
+    steps:
+      - name: Set app name
+        id: vars
+        env:
+          API_REGISTRY: ${{ vars.API_REGISTRY }}
+          WEB_REGISTRY: ${{ vars.WEB_REGISTRY }}
+        run: |
+          API_WORKSPACE="apps/api"
+          WEB_WORKSPACE="apps/deploy-web"
+          
+          FULL_TAG="${{ github.event.inputs.tag }}"
+          IFS='/' read -r scope version <<< "$FULL_TAG"
+          prerelease_type=$(echo "$version" | sed -n 's/.*-\([a-zA-Z]*\).*/\1/p')
+          app="${scope#console-}"
+
+          registry_var="$(echo "$app" | tr '[:lower:]' '[:upper:]')_REGISTRY"
+          registry="${!registry_var}"
+
+          workspace_var="$(echo "$app" | tr '[:lower:]' '[:upper:]')_WORKSPACE"
+          workspace="${!workspace_var}"
+
+          app="${scope#console-}-${prerelease_type:-stable}"
+          version="${version#v}"
+          image="$registry:$version"
+
+          echo "workspace=${workspace}"
+          echo "app=${app}"
+          echo "image=${image}"
+  
+          echo "workspace=${workspace}" >> $GITHUB_OUTPUT
+          echo "app=${app}" >> $GITHUB_OUTPUT
+          echo "image=${image}" >> $GITHUB_OUTPUT
+
+  deploy:
+    needs: define-vars
+    runs-on: ubuntu-latest
+
+    env:
+      ORG: akash-network
+      REPO: provider
+      CLIENT: provider-services
+      CLIENT_VERSION: 0.6.4
+      ARCH: linux_amd64
+      NET: mainnet
+      BLOCK_TIME: 1s
+      CHAIN_LATENCY: 30
+      AKASH_KEYRING_BACKEND: file
+      AKASH_BROADCAST_MODE: block
+      AKASH_YES: 1
+      AKASH_GAS_PRICES: 0.025uakt
+      AKASH_GAS: auto
+      AKASH_GAS_ADJUSTMENT: 1.5
+      AKASH_HOME: /home/runner/.akash
+      AKASH_FROM: default
+      AKASH_OUTPUT: json
+      MIN_BALANCE: 10
+      AKASH_GSEQ: 1
+      AKASH_OSEQ: 1
+      SDL: deploy.yaml
+      PARSED_SDL: ${{ github.workspace }}/${{ inputs.project-path }}/deploy-parsed.yaml
+      PROVIDER: ${{ inputs.provider }}
+
+      SQL_PROXY_AUTH_TOKEN: ${{secrets.SQL_PROXY_AUTH_TOKEN}}
+
+    steps:
+      - name: Deploy Sandbox
+        uses: akash-network/akash-deploy-action/.github/actions/deploy@main
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_API_STAGING_SANDBOX_TOKEN }}
+          API_DOMAIN: ${{ vars.API_SANDBOX_STAGING_DOMAIN }}
+        with:
+          project-path: ${{ needs.define-vars.outputs.workspace }}
+          project-name: ${{ needs.define-vars.outputs.app }}-sandbox
+          image: ${{ needs.define-vars.outputs.image }}
+          seed: ${{ secrets.WALLET_MNEMONIC }}
+          password: ${{ secrets.WALLET_PASSWORD }}
+          github-author-email: "ci@akash.network"
+          github-author-name: "CI"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Deploy Mainnet
+        uses: akash-network/akash-deploy-action/.github/actions/deploy@main
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_API_STAGING_MAINNET_TOKEN }}
+          API_DOMAIN: ${{ vars.API_MAINNET_STAGING_DOMAIN }}
+        with:
+          project-path: ${{ needs.define-vars.outputs.workspace }}
+          project-name: ${{ needs.define-vars.outputs.app }}-mainnet
+          image: ${{ needs.define-vars.outputs.image }}
+          password: ${{ secrets.WALLET_PASSWORD }}
+          seed: ${{ secrets.WALLET_MNEMONIC }}
+          github-author-email: "ci@akash.network"
+          github-author-name: "CI"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
